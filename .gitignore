@@ -9,6 +9,8 @@ Baileys
 # Logs
 logs/**.json
 *.log
+.gateway.log
+webhook-filter/.gateway.log
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*

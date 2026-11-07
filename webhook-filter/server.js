@@ -1,4 +1,87 @@
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+// ==============================================================================
+// 1. CARGADOR NATIVO DE .ENV (Para ejecucion sin Docker / Modo Nativo)
+// ==============================================================================
+function loadEnv() {
+  const possiblePaths = [
+    path.resolve(__dirname, '../.env'),
+    path.resolve(__dirname, '.env'),
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../.env')
+  ];
+
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        content.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#')) {
+            const eqIndex = trimmed.indexOf('=');
+            if (eqIndex > 0) {
+              const key = trimmed.substring(0, eqIndex).trim();
+              let val = trimmed.substring(eqIndex + 1).trim();
+              if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.substring(1, val.length - 1);
+              }
+              if (process.env[key] === undefined || process.env[key] === '') {
+                process.env[key] = val;
+              }
+            }
+          }
+        });
+        break;
+      } catch (err) {}
+    }
+  }
+}
+loadEnv();
+
+// ==============================================================================
+// 2. PERSISTENCIA DUAL DE LOGS (Consola + .gateway.log para el Auditor)
+// ==============================================================================
+let logFilePath = null;
+try {
+  const rootLog = path.resolve(__dirname, '../.gateway.log');
+  fs.appendFileSync(rootLog, '');
+  logFilePath = rootLog;
+} catch (e) {
+  try {
+    const localLog = path.resolve(__dirname, '.gateway.log');
+    fs.appendFileSync(localLog, '');
+    logFilePath = localLog;
+  } catch (err) {}
+}
+
+const origConsoleLog = console.log;
+const origConsoleError = console.error;
+
+function formatLogMessage(args) {
+  return args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+}
+
+console.log = function(...args) {
+  origConsoleLog.apply(console, args);
+  if (logFilePath) {
+    try {
+      const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      fs.appendFileSync(logFilePath, `[${timestamp}] ${formatLogMessage(args)}\n`);
+    } catch (e) {}
+  }
+};
+
+console.error = function(...args) {
+  origConsoleError.apply(console, args);
+  if (logFilePath) {
+    try {
+      const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      fs.appendFileSync(logFilePath, `[${timestamp}] [ERROR] ${formatLogMessage(args)}\n`);
+    } catch (e) {}
+  }
+};
 
 const PORT = parseInt(process.env.PORT || '3050', 10);
 

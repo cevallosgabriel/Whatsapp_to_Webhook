@@ -438,7 +438,96 @@ show_health_check() {
 }
 
 # ==============================================================================
-# 7. APAGADO LIMPIO
+# 7. AUDITOR Y SIMULADOR DE TRAFICO
+# ==============================================================================
+
+show_auditor_view() {
+    clear
+    local dstatus
+    dstatus=$(get_docker_status)
+    local gw_port
+    gw_port=$(get_env_var "PORT" "3050")
+    local log_file="$SCRIPT_DIR/.gateway.log"
+    [ ! -f "$log_file" ] && log_file="/tmp/webhook_filter.log"
+
+    echo -e "${CYAN}==========================================================${NC}"
+    echo -e "${YELLOW}        AUDITOR Y EMULADOR DE MENSAJES WHATSAPP           ${NC}"
+    echo -e "${CYAN}==========================================================${NC}"
+    echo -e " [1] Ver registros de trafico en VIVO (Deteccion Automatica)"
+    echo -e " [2] Ver ultimos 25 eventos procesados"
+    echo -e " [3] Simular envio de mensaje de prueba al Gateway"
+    echo -e " [4] Forzar lectura de logs de Docker (webhook_filter)"
+    echo -e " [5] Forzar lectura de logs nativos (.gateway.log)"
+    echo -e " [0] Volver"
+    echo -e "${CYAN}==========================================================${NC}"
+    echo -n " Elige una opcion [0-5]: "
+    read -r asel
+
+    case "$asel" in
+        1)
+            clear
+            if [ "$dstatus" = "running" ] && docker ps -q -f name=webhook_filter >/dev/null 2>&1; then
+                echo -e "${CYAN} [DOCKER] Conectando a logs en vivo (Ctrl+C para salir)...${NC}\n"
+                docker logs -f --tail 25 webhook_filter
+            elif [ -f "$log_file" ]; then
+                echo -e "${CYAN} [NATIVO] Conectando a logs en vivo (Ctrl+C para salir)...${NC}\n"
+                tail -f "$log_file"
+            else
+                echo -e "${YELLOW} [AVISO] No se encontraron logs activos.${NC}"
+                sleep 2
+            fi
+            ;;
+        2)
+            clear
+            if [ "$dstatus" = "running" ] && docker ps -q -f name=webhook_filter >/dev/null 2>&1; then
+                docker logs --tail 25 webhook_filter
+            elif [ -f "$log_file" ]; then
+                tail -n 25 "$log_file"
+            else
+                echo -e "${YELLOW} [AVISO] No se encontraron registros de logs.${NC}"
+            fi
+            echo -e "\nPresiona [Enter] para continuar..."
+            read -r
+            ;;
+        3)
+            local target_group
+            target_group=$(get_env_var "TARGET_GROUPS" "000000000000000000@g.us")
+            [ "$target_group" = "*" ] && target_group="000000000000000000@g.us"
+            local first_group
+            first_group=$(echo "$target_group" | cut -d',' -f1 | tr -d ' ')
+
+            echo -e "${CYAN} Enviando mensaje de prueba simulando chat '$first_group'...${NC}"
+            curl -s -X POST "http://127.0.0.1:$gw_port" \
+                -H "Content-Type: application/json" \
+                -d "{\"event\":\"messages.upsert\",\"data\":{\"key\":{\"remoteJid\":\"$first_group\",\"fromMe\":false},\"pushName\":\"Auditor\",\"message\":{\"conversation\":\"Prueba $(date)\"}}}"
+            echo -e "\n\nPresiona [Enter] para continuar..."
+            read -r
+            ;;
+        4)
+            clear
+            if command -v docker >/dev/null 2>&1; then
+                docker logs --tail 25 webhook_filter 2>/dev/null || echo -e "${YELLOW}Contenedor webhook_filter no encontrado.${NC}"
+            else
+                echo -e "${YELLOW}Docker no esta instalado en este sistema.${NC}"
+            fi
+            echo -e "\nPresiona [Enter] para continuar..."
+            read -r
+            ;;
+        5)
+            clear
+            if [ -f "$log_file" ]; then
+                tail -n 25 "$log_file"
+            else
+                echo -e "${YELLOW}Archivo de log no encontrado en $log_file${NC}"
+            fi
+            echo -e "\nPresiona [Enter] para continuar..."
+            read -r
+            ;;
+    esac
+}
+
+# ==============================================================================
+# 8. APAGADO LIMPIO
 # ==============================================================================
 
 stop_all_services() {
@@ -449,7 +538,7 @@ stop_all_services() {
 
     if command -v docker >/dev/null 2>&1; then
         echo -e " Deteniendo contenedores Docker Compose..."
-        docker compose stop
+        docker compose stop 2>/dev/null || true
     fi
 
     echo -e " Deteniendo tuneles de Cloudflare..."
@@ -464,7 +553,7 @@ stop_all_services() {
 }
 
 # ==============================================================================
-# 8. BUCLE PRINCIPAL
+# 9. BUCLE PRINCIPAL
 # ==============================================================================
 
 main_menu() {
@@ -497,10 +586,11 @@ main_menu() {
         echo -e "${YELLOW} Administracion y Control:${NC}"
         echo -e "   [5] Panel de Configuracion y Credenciales (.env Wizard)"
         echo -e "   [6] Diagnostico y Salud en Tiempo Real (Health Check)"
-        echo -e "   [7] Detener todos los servicios"
+        echo -e "   [7] Auditor de Mensajes y Simulador de Trafico"
+        echo -e "   [8] Detener todos los servicios"
         echo -e "   [0] Salir"
         echo -e "${CYAN}==========================================================${NC}"
-        echo -n " Elige una opcion [0-7]: "
+        echo -n " Elige una opcion [0-8]: "
         read -r choice
 
         case "$choice" in
@@ -510,7 +600,8 @@ main_menu() {
             4) start_native_mode "true" ;;
             5) show_config_wizard ;;
             6) show_health_check ;;
-            7) stop_all_services ;;
+            7) show_auditor_view ;;
+            8) stop_all_services ;;
             0) exit 0 ;;
             *) echo "Opcion no valida"; sleep 1 ;;
         esac

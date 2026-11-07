@@ -457,8 +457,8 @@ function Start-NativeMode {
         Write-Host " Iniciando Gateway de Webhooks nativo con Node.js ($($nodeInfo.Version))..." -ForegroundColor Cyan
         $serverPath = Join-Path $script:ScriptDir "webhook-filter\server.js"
         
-        # Iniciar en una ventana persistente independiente para ver logs en vivo
-        $startArgs = "/k title Gateway Webhook WhatsApp (Nativo) && node `"$serverPath`""
+        # Iniciar en una ventana persistente independiente asegurando el directorio de trabajo
+        $startArgs = "/k cd /d `"$script:ScriptDir`" && title Gateway Webhook WhatsApp (Nativo) && node `"$serverPath`""
         Start-Process "cmd.exe" -ArgumentList $startArgs
         
         Start-Sleep -Seconds 2
@@ -662,38 +662,85 @@ function Show-HealthCheckDashboard {
 # ==============================================================================
 
 function Show-AuditorView {
+    $dInfo = Get-DockerInfo
+    $gwPort = [int](Get-EnvVar "PORT" "3050")
+    $isPortActive = Test-PortListening $gwPort
+
+    $logFile = Join-Path $script:ScriptDir ".gateway.log"
+    if (-not (Test-Path $logFile)) {
+        $alt = Join-Path $script:ScriptDir "webhook-filter\.gateway.log"
+        if (Test-Path $alt) { $logFile = $alt }
+    }
+
+    $dockerContainerRunning = $false
+    if ($dInfo.Running) {
+        $cCheck = docker ps -q -f name=webhook_filter 2>$null
+        if ($cCheck) { $dockerContainerRunning = $true }
+    }
+
+    $motorTexto = "Inactivo / Ninguno"
+    if ($dockerContainerRunning) {
+        $motorTexto = "Contenedor Docker (webhook_filter)"
+    } elseif ($isPortActive) {
+        $motorTexto = "Modo Nativo (Node.js en puerto $gwPort)"
+    }
+
     Clear-Host
     Write-Host "==========================================================" -ForegroundColor Cyan
     Write-Host "        AUDITOR Y EMULADOR DE MENSAJES WHATSAPP           " -ForegroundColor Yellow
     Write-Host "==========================================================" -ForegroundColor Cyan
-    Write-Host " [1] Ver registros de trafico en VIVO (Logs en tiempo real)"
-    Write-Host " [2] Ver ultimos 25 eventos procesados"
+    Write-Host "  * Motor Detectado : $motorTexto" -ForegroundColor $(if ($motorTexto -ne "Inactivo / Ninguno") { "Green" } else { "Gray" })
+    Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host " [1] Ver registros de trafico en VIVO (Deteccion Automatica)"
+    Write-Host " [2] Ver ultimos 25 eventos procesados (Deteccion Automatica)"
     Write-Host " [3] Simular envio de mensaje de prueba al Gateway"
+    Write-Host " [4] Forzar lectura de logs de Docker (webhook_filter)"
+    Write-Host " [5] Forzar lectura de logs de Node.js Nativo (.gateway.log)"
     Write-Host " [0] Volver"
     Write-Host "==========================================================" -ForegroundColor Cyan
-    Write-Host -NoNewline " Selecciona una opcion [0-3]: "
+    Write-Host -NoNewline " Selecciona una opcion [0-5]: "
     $sel = Read-Host
 
     switch ($sel) {
         "1" {
             Clear-Host
-            Write-Host " Mostrando logs en vivo (Ctrl+C para salir)...`n" -ForegroundColor Cyan
-            docker logs -f --tail 20 webhook_filter 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host " Contenedor webhook_filter no encontrado en Docker." -ForegroundColor Yellow
-                Write-Host " Si estas en Modo Nativo, revisa la ventana de terminal de Node.js." -ForegroundColor Gray
-                Start-Sleep -Seconds 2
+            if ($dockerContainerRunning) {
+                Write-Host " [DOCKER] Conectando a logs en vivo (Ctrl+C para salir)...`n" -ForegroundColor Cyan
+                docker logs -f --tail 25 webhook_filter
+            } elseif (Test-Path $logFile) {
+                Write-Host " [NATIVO] Conectando a .gateway.log en vivo (Ctrl+C para salir)...`n" -ForegroundColor Cyan
+                Get-Content -Path $logFile -Wait -Tail 25
+            } elseif ($isPortActive) {
+                Write-Host " Gateway nativo esta activo en puerto $gwPort." -ForegroundColor Cyan
+                Write-Host " Los logs en vivo se muestran en la ventana: 'Gateway Webhook WhatsApp (Nativo)'" -ForegroundColor Yellow
+                Write-Host "`nPresiona cualquier tecla..."
+                [Console]::ReadKey($true) | Out-Null
+            } else {
+                Write-Host " [AVISO] No hay ningun servicio activo de Gateway (Docker ni Node.js)." -ForegroundColor Yellow
+                Write-Host " Inicia el sistema primero con la opcion [1], [2], [3] o [4]." -ForegroundColor Gray
+                Write-Host "`nPresiona cualquier tecla..."
+                [Console]::ReadKey($true) | Out-Null
             }
         }
         "2" {
             Clear-Host
-            Write-Host " Ultimos eventos:`n" -ForegroundColor Cyan
-            docker logs --tail 25 webhook_filter 2>$null
+            if ($dockerContainerRunning) {
+                Write-Host " [DOCKER] Ultimos eventos del contenedor webhook_filter:`n" -ForegroundColor Cyan
+                docker logs --tail 25 webhook_filter
+            } elseif (Test-Path $logFile) {
+                Write-Host " [NATIVO] Ultimos eventos de .gateway.log:`n" -ForegroundColor Cyan
+                Get-Content -Path $logFile -Tail 25
+            } elseif ($isPortActive) {
+                Write-Host " Gateway nativo esta activo en puerto $gwPort." -ForegroundColor Cyan
+                Write-Host " Revisa la ventana abierta de 'Gateway Webhook WhatsApp (Nativo)'." -ForegroundColor Gray
+            } else {
+                Write-Host " [AVISO] No se encontraron registros activos de Docker ni archivo .gateway.log." -ForegroundColor Yellow
+                Write-Host " Si usas Modo Nativo, inicia el Gateway con la opcion [3] o [4]." -ForegroundColor Gray
+            }
             Write-Host "`nPresiona cualquier tecla..."
             [Console]::ReadKey($true) | Out-Null
         }
         "3" {
-            $gwPort = Get-EnvVar "PORT" "3050"
             $targetGroup = Get-EnvVar "TARGET_GROUPS" "000000000000000000@g.us"
             if ($targetGroup -eq "*") { $targetGroup = "000000000000000000@g.us" }
             $firstGroup = ($targetGroup -split ",")[0].Trim()
@@ -719,6 +766,35 @@ function Show-AuditorView {
                 $res | Format-List
             } catch {
                 Write-Host " [ERROR] No se pudo enviar el mensaje de prueba: $_" -ForegroundColor Red
+            }
+            Write-Host "`nPresiona cualquier tecla..."
+            [Console]::ReadKey($true) | Out-Null
+        }
+        "4" {
+            Clear-Host
+            if (-not $dInfo.Installed) {
+                Write-Host " [AVISO] Docker no esta instalado en este equipo." -ForegroundColor Yellow
+                Write-Host " Para ver logs sin Docker, utiliza la opcion [5] (Logs de Node.js Nativo)." -ForegroundColor Gray
+            } elseif (-not $dInfo.Running) {
+                Write-Host " [AVISO] Docker esta instalado pero el motor esta detenido." -ForegroundColor Yellow
+            } else {
+                Write-Host " Registros de Docker webhook_filter:`n" -ForegroundColor Cyan
+                docker logs --tail 25 webhook_filter 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host " Contenedor webhook_filter no encontrado o no ha iniciado." -ForegroundColor Gray
+                }
+            }
+            Write-Host "`nPresiona cualquier tecla..."
+            [Console]::ReadKey($true) | Out-Null
+        }
+        "5" {
+            Clear-Host
+            if (Test-Path $logFile) {
+                Write-Host " Registros nativos ($logFile):`n" -ForegroundColor Cyan
+                Get-Content -Path $logFile -Tail 25
+            } else {
+                Write-Host " [AVISO] No se encontro el archivo $logFile." -ForegroundColor Yellow
+                Write-Host " Si el Gateway esta corriendo nativo, revisa la ventana de comandos de Node.js." -ForegroundColor Gray
             }
             Write-Host "`nPresiona cualquier tecla..."
             [Console]::ReadKey($true) | Out-Null
