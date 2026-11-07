@@ -842,9 +842,43 @@ function Stop-AllServices {
         Write-Host " [OK] Proceso nativo finalizado." -ForegroundColor Green
     }
 
+    # 5. Detener procesos de WhatsApp Nativo (Baileys)
+    $waProcs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "whatsapp-native[\\/]client\.js" }
+    if ($waProcs) {
+        Write-Host " Deteniendo proceso de WhatsApp Nativo..." -ForegroundColor Cyan
+        $waProcs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Write-Host " [OK] Conector de WhatsApp detenido." -ForegroundColor Green
+    }
+
     Write-Host "`n Todos los servicios han sido detenidos de forma segura." -ForegroundColor Green
     Write-Host " Tus datos de sesion de WhatsApp y base de datos estan preservados." -ForegroundColor Gray
     Start-Sleep -Seconds 2
+}
+
+function Start-NativeWhatsApp {
+    Clear-Host
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host "     VINCULAR WHATSAPP NATIVO (ESCANEAR CODIGO QR)        " -ForegroundColor Yellow
+    Write-Host "==========================================================" -ForegroundColor Cyan
+
+    $waDir = Join-Path $script:ScriptDir "whatsapp-native"
+    $waClient = Join-Path $waDir "client.js"
+    $nodeModules = Join-Path $waDir "node_modules\@whiskeysockets\baileys"
+
+    if (-not (Test-Path $nodeModules)) {
+        Write-Host " Instalando dependencias de WhatsApp Nativo (Baileys)..." -ForegroundColor Cyan
+        $cmdInstall = "cd /d `"$waDir`" && npm install --no-audit --no-fund"
+        Start-Process "cmd.exe" -ArgumentList "/c $cmdInstall" -Wait
+    }
+
+    Write-Host "`n Iniciando terminal de escaneo de QR..." -ForegroundColor Green
+    $cmdStart = "/k cd /d `"$script:ScriptDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
+    Start-Process "cmd.exe" -ArgumentList $cmdStart
+
+    Write-Host " [OK] Ventana de conexion abierta." -ForegroundColor Green
+    Write-Host " Escanea el codigo QR que aparece en esa ventana con tu telefono." -ForegroundColor Yellow
+    Write-Host "`nPresiona cualquier tecla para volver al menu..."
+    [Console]::ReadKey($true) | Out-Null
 }
 
 # ==============================================================================
@@ -896,9 +930,10 @@ function Main-Menu {
         Write-Host "   [6] Diagnostico y Salud en Tiempo Real (Health Check)"
         Write-Host "   [7] Auditor de Mensajes y Simulador de Trafico"
         Write-Host "   [8] Detener todos los servicios" -ForegroundColor Red
+        Write-Host "   [9] Vincular WhatsApp Nativo (Escanear Codigo QR sin Docker)" -ForegroundColor Magenta
         Write-Host "   [0] Salir"
         Write-Host "==========================================================" -ForegroundColor Cyan
-        Write-Host -NoNewline " Elige una opcion [0-8]: "
+        Write-Host -NoNewline " Elige una opcion [0-9]: "
         $choice = Read-Host
 
         switch ($choice) {
@@ -910,6 +945,7 @@ function Main-Menu {
             "6" { Show-HealthCheckDashboard }
             "7" { Show-AuditorView }
             "8" { Stop-AllServices }
+            "9" { Start-NativeWhatsApp }
             "0" {
                 Write-Host "`nHasta pronto!`n" -ForegroundColor Green
                 exit 0

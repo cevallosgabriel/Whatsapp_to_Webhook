@@ -49,5 +49,9 @@ cleanup_script.*
 .DS_Store
 *.DS_Store
 .tool-versions
-
 /prisma/migrations/*
+
+# WhatsApp Native Connector
+whatsapp-native/session_auth/
+whatsapp-native/node_modules/
+iniciar_whatsapp.bat

@@ -547,9 +547,27 @@ stop_all_services() {
 
     echo -e " Deteniendo procesos nativos..."
     pkill -f "webhook-filter/server.js" 2>/dev/null || true
+    pkill -f "whatsapp-native/client.js" 2>/dev/null || true
 
     echo -e "${GREEN} [OK] Todos los servicios detenidos correctamente.${NC}"
     sleep 2
+}
+
+start_native_whatsapp() {
+    clear
+    echo -e "${CYAN}==========================================================${NC}"
+    echo -e "${YELLOW}     VINCULAR WHATSAPP NATIVO (ESCANEAR CODIGO QR)        ${NC}"
+    echo -e "${CYAN}==========================================================${NC}"
+
+    local wa_dir="$SCRIPT_DIR/whatsapp-native"
+    if [ ! -d "$wa_dir/node_modules/@whiskeysockets/baileys" ]; then
+        echo -e "${CYAN} Instalando dependencias de WhatsApp Nativo (Baileys)...${NC}"
+        cd "$wa_dir" && npm install --no-audit --no-fund && cd "$SCRIPT_DIR"
+    fi
+
+    echo -e "\n${GREEN} Iniciando terminal de escaneo de QR...${NC}"
+    echo -e "${YELLOW} Escanea el codigo QR que aparecera a continuacion:${NC}\n"
+    node "$wa_dir/client.js"
 }
 
 # ==============================================================================
@@ -588,9 +606,10 @@ main_menu() {
         echo -e "   [6] Diagnostico y Salud en Tiempo Real (Health Check)"
         echo -e "   [7] Auditor de Mensajes y Simulador de Trafico"
         echo -e "   [8] Detener todos los servicios"
+        echo -e "   [9] Vincular WhatsApp Nativo (Escanear Codigo QR sin Docker)"
         echo -e "   [0] Salir"
         echo -e "${CYAN}==========================================================${NC}"
-        echo -n " Elige una opcion [0-8]: "
+        echo -n " Elige una opcion [0-9]: "
         read -r choice
 
         case "$choice" in
@@ -602,6 +621,7 @@ main_menu() {
             6) show_health_check ;;
             7) show_auditor_view ;;
             8) stop_all_services ;;
+            9) start_native_whatsapp ;;
             0) exit 0 ;;
             *) echo "Opcion no valida"; sleep 1 ;;
         esac

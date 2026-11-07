@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-native-connector",
+  "version": "1.0.0",
+  "description": "Conector nativo ultra ligero de WhatsApp para WhatsApp to Webhook (sin Docker)",
+  "main": "client.js",
+  "scripts": {
+    "start": "node client.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.19",
+    "qrcode-terminal": "^0.12.0",
+    "pino": "^9.6.0"
+  }
+}
