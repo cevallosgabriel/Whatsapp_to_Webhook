@@ -1,7 +1,7 @@
 # 🚀 Whatsapp_to_webhook | WhatsApp Webhook Gateway & Event Router
 
 <p align="center">
-  <img src="./public/hover-evolution.png" alt="Evolution API Gateway" width="300" />
+  <img src="./docs/assets/hover-evolution.png" alt="Evolution API Gateway" width="300" />
 </p>
 
 <p align="center">
@@ -166,10 +166,10 @@ Para ver la actividad y diagnóstico en tiempo real, ejecuta **`lanzador.bat`** 
 ## ☁️ Alternativa 100% Serverless: Cloudflare Workers
 
 Si prefieres filtrar el tráfico directamente en la nube de Cloudflare sin consumir memoria RAM de tu máquina, revisa nuestra guía paso a paso:
-👉 **[GUIA_CLOUDFLARE_WORKERS.md](./GUIA_CLOUDFLARE_WORKERS.md)**
+👉 **[GUIA_CLOUDFLARE_WORKERS.md](./docs/GUIA_CLOUDFLARE_WORKERS.md)**
 
 Para desplegar y configurar Evolution API en profundidad (bases de datos, variables y endpoints):
-👉 **[GUIA_EVOLUTION_API.md](./GUIA_EVOLUTION_API.md)**
+👉 **[GUIA_EVOLUTION_API.md](./docs/GUIA_EVOLUTION_API.md)**
 
 ---
 

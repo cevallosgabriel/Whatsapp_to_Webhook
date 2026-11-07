@@ -27,7 +27,7 @@ services:
     ports:
       - "4433:80"
     volumes:
-      - ./manager-nginx.conf:/etc/nginx/conf.d/nginx.conf:ro
+      - ./manager/nginx.conf:/etc/nginx/conf.d/nginx.conf:ro
       - ./manager/dist:/usr/share/nginx/html:ro
     networks:
       - evolution-net
