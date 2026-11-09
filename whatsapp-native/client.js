@@ -246,6 +246,12 @@ async function handleIncomingMessage(message) {
   if (msgId) markIdProcessed(msgId);
 
   const remoteJid = message.key.remoteJid || '';
+
+  // Descarte silencioso de eventos de sincronización interna del dispositivo y broadcasts
+  if (remoteJid.endsWith('@lid') || remoteJid === 'status@broadcast' || remoteJid.endsWith('@newsletter')) {
+    return;
+  }
+
   const fromMe = message.key.fromMe || false;
   const pushName = message.pushName || (fromMe ? 'Yo (Mi Dispositivo)' : 'Contacto');
 
@@ -324,7 +330,7 @@ async function connectToWhatsApp() {
     version,
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'error' }),
+    logger: pino({ level: 'silent' }),
     browser: Browsers.windows('Chrome'),
     syncFullHistory: false,
     defaultQueryTimeoutMs: 120000,
