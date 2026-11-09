@@ -650,9 +650,11 @@ function Show-HealthCheckDashboard {
         Write-Host "     El endpoint /health no responde en http://127.0.0.1:$gwPort" -ForegroundColor DarkGray
     }
 
-    # 5. Estado del Tunel Cloudflare
-    Write-Host "`n [5] Estado de Tunel Publico (Cloudflare):" -ForegroundColor White
-    $cfProcs = Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue
+    # 5. Estado del Tunel Cloudflare (Exclusivo de este Gateway)
+    Write-Host "`n [5] Estado de Tunel Publico de WhatsApp (Cloudflare):" -ForegroundColor White
+    $cfProcs = Get-CimInstance Win32_Process | Where-Object { 
+        $_.Name -like "*cloudflared*" -and $_.CommandLine -match "127\.0\.0\.1:$gwPort|localhost:$gwPort"
+    }
     $tUrl = Get-TunnelUrlFromLog
     if ($cfProcs -and $tUrl) {
         Write-Host "     Estado  : EN LINEA (Accesible publicamente)" -ForegroundColor Green
@@ -660,7 +662,7 @@ function Show-HealthCheckDashboard {
     } elseif ($cfProcs) {
         Write-Host "     Estado  : RECONECTANDO / SINCRONIZANDO (Proceso activo)" -ForegroundColor Yellow
     } else {
-        Write-Host "     Estado  : DESCONECTADO (Ningun tunel activo)" -ForegroundColor Gray
+        Write-Host "     Estado  : DESCONECTADO (Ningun tunel activo para este servicio)" -ForegroundColor Gray
     }
 
     Write-Host "`n==========================================================" -ForegroundColor Cyan
@@ -831,14 +833,17 @@ function Stop-AllServices {
         Write-Host " [OK] Contenedores detenidos." -ForegroundColor Green
     }
 
-    # 2. Detener Procesos de Tunel Cloudflare
-    $cfProcs = Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue
-    if ($cfProcs) {
-        Write-Host " Cerrando procesos de Cloudflare Tunnel..." -ForegroundColor Cyan
-        $cfProcs | Stop-Process -Force -ErrorAction SilentlyContinue
-        Write-Host " [OK] Tuneles finalizados." -ForegroundColor Green
+    # 2. Detener Procesos de Tunel Cloudflare (Exclusivamente los vinculados a este Gateway)
+    $port = [int](Get-EnvVar "PORT" "3050")
+    $cfProcs = Get-CimInstance Win32_Process | Where-Object { 
+        $_.Name -like "*cloudflared*" -and $_.CommandLine -match "127\.0\.0\.1:$port|localhost:$port" 
     }
-
+    if ($cfProcs) {
+        Write-Host " Cerrando tunel de Cloudflare asignado al Gateway de WhatsApp (Puerto $port)..." -ForegroundColor Cyan
+        $cfProcs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Write-Host " [OK] Tunel de WhatsApp finalizado (otros tuneles preservados intactos)." -ForegroundColor Green
+    }
+    
     # 3. Limpiar archivo de log de tunel
     if (Test-Path $script:TunnelLogPath) {
         Remove-Item $script:TunnelLogPath -Force -ErrorAction SilentlyContinue

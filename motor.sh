@@ -546,8 +546,11 @@ stop_all_services() {
         docker compose stop 2>/dev/null || true
     fi
 
-    echo -e " Deteniendo tuneles de Cloudflare..."
-    pkill -f "cloudflared tunnel" 2>/dev/null || true
+    echo -e " Deteniendo tunel de Cloudflare del Gateway de WhatsApp..."
+    local gw_port
+    gw_port=$(get_env_var "PORT" "3050")
+    pkill -f "cloudflared.*127\.0\.0\.1:${gw_port}" 2>/dev/null || true
+    pkill -f "cloudflared.*localhost:${gw_port}" 2>/dev/null || true
     rm -f "$TUNNEL_LOG"
 
     echo -e " Deteniendo procesos nativos..."
