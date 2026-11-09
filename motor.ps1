@@ -469,6 +469,17 @@ function Start-NativeMode {
 
     if ($WithTunnel) {
         Start-CloudflareTunnel -LocalPort $port
+
+        # Iniciar también el conector nativo de WhatsApp automáticamente en segundo plano
+        $waDir = Join-Path $script:ScriptDir "whatsapp-native"
+        $waClient = Join-Path $waDir "client.js"
+        $waRunning = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "whatsapp-native[\\/]client\.js" }
+
+        if (-not $waRunning -and (Test-Path $waClient)) {
+            Write-Host " Iniciando Conector Nativo de WhatsApp (Segundo plano)..." -ForegroundColor Cyan
+            $waArgs = "/k cd /d `"$script:ScriptDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
+            Start-Process "cmd.exe" -ArgumentList $waArgs
+        }
     }
 
     Write-Host "`nPresiona cualquier tecla para volver al menu..."

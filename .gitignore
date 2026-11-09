@@ -55,4 +55,5 @@ cleanup_script.*
 whatsapp-native/session_auth/
 whatsapp-native/node_modules/
 whatsapp-native/qr_whatsapp.png
+whatsapp-native/processed_ids.json
 iniciar_whatsapp.bat

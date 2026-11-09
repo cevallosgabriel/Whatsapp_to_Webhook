@@ -299,6 +299,11 @@ start_native_mode() {
 
     if [ "$with_tunnel" = "true" ]; then
         start_cloudflare_tunnel "$port"
+
+        if [ -f "$SCRIPT_DIR/whatsapp-native/client.js" ] && ! pgrep -f "whatsapp-native/client.js" >/dev/null 2>&1; then
+            echo -e "${CYAN} Iniciando Conector Nativo de WhatsApp en segundo plano...${NC}"
+            nohup node "$SCRIPT_DIR/whatsapp-native/client.js" >> "$SCRIPT_DIR/.gateway.log" 2>&1 &
+        fi
     fi
 
     echo -e "\nPresiona [Enter] para volver al menu..."
