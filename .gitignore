@@ -54,4 +54,5 @@ cleanup_script.*
 # WhatsApp Native Connector
 whatsapp-native/session_auth/
 whatsapp-native/node_modules/
+whatsapp-native/qr_whatsapp.png
 iniciar_whatsapp.bat

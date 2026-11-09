@@ -1,13 +1,10 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-// ==============================================================================
-// 1. CARGA AUTOMÁTICA DE .ENV
-// ==============================================================================
 function loadEnv() {
   const possiblePaths = [
     path.resolve(__dirname, '../.env'),
@@ -46,9 +43,6 @@ loadEnv();
 const GATEWAY_PORT = parseInt(process.env.PORT || '3050', 10);
 const AUTH_DIR = path.resolve(__dirname, 'session_auth');
 
-// ==============================================================================
-// 2. REENVÍO DE EVENTO AL GATEWAY LOCAL
-// ==============================================================================
 function forwardEventToGateway(payload) {
   const data = JSON.stringify(payload);
   const req = http.request({
@@ -60,22 +54,33 @@ function forwardEventToGateway(payload) {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(data)
     },
-    timeout: 3000
-  }, (res) => {
-    // Evento entregado exitosamente al Gateway
-  });
+    timeout: 5000
+  }, () => {});
 
-  req.on('error', (err) => {
-    // Si el gateway no está listo aún, no botar el conector
-  });
-
+  req.on('error', () => {});
   req.write(data);
   req.end();
 }
 
-// ==============================================================================
-// 3. CONEXIÓN PRINCIPAL WHATSAPP (BAILEYS)
-// ==============================================================================
+function processMessage(message) {
+  if (!message || !message.key) return;
+
+  const formattedPayload = {
+    event: 'messages.upsert',
+    data: {
+      key: {
+        remoteJid: message.key.remoteJid || '',
+        fromMe: message.key.fromMe || false,
+        id: message.key.id || ''
+      },
+      pushName: message.pushName || (message.key.fromMe ? 'Yo (Mi Dispositivo)' : 'Contacto'),
+      message: message.message || {}
+    }
+  };
+
+  forwardEventToGateway(formattedPayload);
+}
+
 async function connectToWhatsApp() {
   if (!fs.existsSync(AUTH_DIR)) {
     fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -93,57 +98,68 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
-    browser: ['Whatsapp_to_Webhook', 'Desktop', '1.0.0']
+    logger: pino({ level: 'error' }),
+    browser: Browsers.windows('Desktop'),
+    syncFullHistory: false,
+    defaultQueryTimeoutMs: 120000,
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 25000,
+    generateHighQualityLinkPreview: false,
+    getMessage: async (key) => ({ conversation: '' })
   });
 
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log('\n📱 ESCANEA ESTE CÓDIGO QR CON TU WHATSAPP:\n');
-      qrcode.generate(qr, { small: true });
-      console.log('Instrucciones: Abre WhatsApp > Dispositivos Vinculados > Vincular un dispositivo.\n');
+  sock.ev.process(async (events) => {
+    if (events['creds.update']) {
+      await saveCreds();
     }
 
-    if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`⚠️ Conexión cerrada (Código: ${statusCode || 'desconocido'}). Reconectando: ${shouldReconnect}...`);
-      if (shouldReconnect) {
-        setTimeout(connectToWhatsApp, 3000);
-      } else {
-        console.log('❌ Sesión cerrada permanentemente en el teléfono. Elimina "session_auth" para escanear de nuevo.');
+    if (events['connection.update']) {
+      const { connection, lastDisconnect, qr } = events['connection.update'];
+
+      if (qr) {
+        console.log('\n📱 ESCANEA ESTE CÓDIGO QR CON TU WHATSAPP:\n');
+        qrcode.generate(qr, { small: true });
+        console.log('Instrucciones: Abre WhatsApp > Dispositivos Vinculados > Vincular un dispositivo.\n');
+        try {
+          const QRCodeImg = require('qrcode');
+          QRCodeImg.toFile(path.resolve(__dirname, 'qr_whatsapp.png'), qr, { width: 350 });
+        } catch (e) {}
       }
-    } else if (connection === 'open') {
-      console.log('\n==================================================================');
-      console.log('  ✅ [OK] ¡WHATSAPP VINCULADO Y EN LÍNEA EXITOSAMENTE!');
-      console.log('  🚀 Todos los mensajes entrantes se reenviarán al Gateway (3050).');
-      console.log('==================================================================\n');
+
+      if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        console.log(`⚠️ Conexión cerrada (Código: ${statusCode || 'desconocido'}). Reconectando: ${shouldReconnect}...`);
+        if (shouldReconnect) {
+          setTimeout(connectToWhatsApp, 3000);
+        } else {
+          console.log('❌ Sesión cerrada en el teléfono. Elimina "session_auth" para escanear de nuevo.');
+        }
+      } else if (connection === 'open') {
+        console.log('\n==================================================================');
+        console.log('  ✅ [OK] ¡WHATSAPP VINCULADO Y EN LÍNEA EXITOSAMENTE!');
+        console.log('  🚀 Todos los mensajes entrantes se reenviarán al Gateway (3050).');
+        console.log('==================================================================\n');
+      }
     }
-  });
 
-  sock.ev.on('messages.upsert', async (m) => {
-    const message = m.messages?.[0];
-    if (!message) return;
-
-    // Normalizar payload al esquema que el Gateway espera
-    const formattedPayload = {
-      event: 'messages.upsert',
-      data: {
-        key: {
-          remoteJid: message.key?.remoteJid || '',
-          fromMe: message.key?.fromMe || false,
-          id: message.key?.id || ''
-        },
-        pushName: message.pushName || (message.key?.fromMe ? 'Yo' : 'Contacto'),
-        message: message.message || {}
+    if (events['messaging-history.set']) {
+      const history = events['messaging-history.set'];
+      if (Array.isArray(history.messages)) {
+        for (const msg of history.messages) {
+          processMessage(msg);
+        }
       }
-    };
+    }
 
-    forwardEventToGateway(formattedPayload);
+    if (events['messages.upsert']) {
+      const upsert = events['messages.upsert'];
+      if (Array.isArray(upsert.messages)) {
+        for (const message of upsert.messages) {
+          processMessage(message);
+        }
+      }
+    }
   });
 }
 
