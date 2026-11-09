@@ -477,7 +477,7 @@ function Start-NativeMode {
 
         if (-not $waRunning -and (Test-Path $waClient)) {
             Write-Host " Iniciando Conector Nativo de WhatsApp (Segundo plano)..." -ForegroundColor Cyan
-            $waArgs = "/k cd /d `"$script:ScriptDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
+            $waArgs = "/k cd /d `"$waDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
             Start-Process "cmd.exe" -ArgumentList $waArgs
         }
     }
@@ -883,7 +883,7 @@ function Start-NativeWhatsApp {
     }
 
     Write-Host "`n Iniciando terminal de escaneo de QR..." -ForegroundColor Green
-    $cmdStart = "/k cd /d `"$script:ScriptDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
+    $cmdStart = "/k cd /d `"$waDir`" && title Conector WhatsApp Nativo && node `"$waClient`""
     Start-Process "cmd.exe" -ArgumentList $cmdStart
 
     Write-Host " [OK] Ventana de conexion abierta." -ForegroundColor Green

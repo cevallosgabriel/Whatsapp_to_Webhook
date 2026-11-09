@@ -3,7 +3,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   Browsers,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  normalizeMessageContent
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const pino = require('pino');
@@ -49,7 +50,7 @@ function loadEnv() {
 loadEnv();
 
 // ==============================================================================
-// 2. CONFIGURACIÓN Y PERSISTENCIA DE ESTADO
+// 2. CONFIGURACIÓN, PERSISTENCIA Y ALMACÉN EN MEMORIA (MSGSTORE)
 // ==============================================================================
 const AUTH_DIR = path.resolve(__dirname, 'session_auth');
 const PROCESSED_IDS_FILE = path.resolve(__dirname, 'processed_ids.json');
@@ -76,8 +77,25 @@ const DESTINATIONS = PARSED_URLS.map(origUrl => {
   return { original: origUrl, prodUrl, testUrl, isDual };
 });
 
+// Almacén en memoria para citas y reintentos de descifrado
+const msgStore = new Map();
+
+function saveToMsgStore(id, message) {
+  if (!id || !message) return;
+  msgStore.set(id, message);
+  if (msgStore.size > 2000) {
+    const oldestKey = msgStore.keys().next().value;
+    msgStore.delete(oldestKey);
+  }
+}
+
+// Formato de hora local [HH:mm:ss] compatible con el Auditor de motor.ps1
+function getLocalTimestamp() {
+  return new Date().toLocaleTimeString('es-ES', { hour12: false });
+}
+
 function logEvent(msg) {
-  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const ts = getLocalTimestamp();
   const line = `[${ts}] ${msg}`;
   console.log(line);
   try {
@@ -109,24 +127,29 @@ function markIdProcessed(id) {
 }
 
 // ==============================================================================
-// 3. DESENVOLVER MENSAJES (EFÍMEROS, MULTIMEDIA, STICKERS, AUDIOS)
+// 3. DESENVOLVER MENSAJES (normalizeMessageContent, EDITADOS, ENCUESTAS, REACCIONES)
 // ==============================================================================
 function unwrapMessage(rawMsg) {
   if (!rawMsg) return {};
-  let msg = rawMsg;
+  let msg = normalizeMessageContent(rawMsg) || rawMsg;
 
-  // Desenvolver mensajes efímeros / temporales
+  // Desenvolver mensajes efímeros / temporales / viewOnce
   if (msg.ephemeralMessage?.message) {
-    msg = msg.ephemeralMessage.message;
+    msg = normalizeMessageContent(msg.ephemeralMessage.message) || msg.ephemeralMessage.message;
   }
   if (msg.viewOnceMessage?.message) {
-    msg = msg.viewOnceMessage.message;
+    msg = normalizeMessageContent(msg.viewOnceMessage.message) || msg.viewOnceMessage.message;
   }
   if (msg.viewOnceMessageV2?.message) {
-    msg = msg.viewOnceMessageV2.message;
+    msg = normalizeMessageContent(msg.viewOnceMessageV2.message) || msg.viewOnceMessageV2.message;
   }
   if (msg.documentWithCaptionMessage?.message) {
-    msg = msg.documentWithCaptionMessage.message;
+    msg = normalizeMessageContent(msg.documentWithCaptionMessage.message) || msg.documentWithCaptionMessage.message;
+  }
+
+  // Soporte para mensajes editados
+  if (msg.protocolMessage?.editedMessage) {
+    msg = normalizeMessageContent(msg.protocolMessage.editedMessage) || msg.protocolMessage.editedMessage;
   }
 
   return msg;
@@ -144,6 +167,9 @@ function extractTextSnippet(msg) {
   if (unwrapped.documentMessage) return '📄 [Documento: ' + (unwrapped.documentMessage.fileName || 'archivo') + ']';
   if (unwrapped.contactMessage) return '👤 [Contacto: ' + (unwrapped.contactMessage.displayName || '') + ']';
   if (unwrapped.locationMessage) return '📍 [Ubicación]';
+  if (unwrapped.reactionMessage) return '👍 [Reacción: ' + (unwrapped.reactionMessage.text || '') + ']';
+  if (unwrapped.pollCreationMessage) return '📊 [Encuesta: ' + (unwrapped.pollCreationMessage.name || '') + ']';
+  if (unwrapped.pollUpdateMessage) return '📊 [Voto de Encuesta]';
 
   return '[Multimedia / Mensaje de Sistema]';
 }
@@ -181,14 +207,12 @@ async function dispatchAll(payload, snippet, pushName, remoteJid) {
 
   for (const dest of DESTINATIONS) {
     if (dest.isDual) {
-      // Intentar primero URL de prueba (test)
       const resTest = await dispatchToWebhook(dest.testUrl, payload);
       if (resTest.ok) {
         logEvent(`🚀 [ENVIADO - TEST] De: "${pushName}" | Chat: ${remoteJid} -> ${dest.testUrl} (HTTP ${resTest.status})`);
         continue;
       }
 
-      // Si test no está activo (ej. webhook de test en espera en n8n), enviar a producción
       const resProd = await dispatchToWebhook(dest.prodUrl, payload);
       if (resProd.ok) {
         logEvent(`🚀 [ENVIADO - PROD] De: "${pushName}" | Chat: ${remoteJid} -> ${dest.prodUrl} (HTTP ${resProd.status})`);
@@ -213,8 +237,11 @@ async function handleIncomingMessage(message) {
   if (!message || !message.key) return;
 
   const msgId = message.key.id;
+  const rawMessage = message.message || {};
+  saveToMsgStore(msgId, rawMessage);
+
   if (msgId && processedIds.has(msgId)) {
-    return; // Evitar procesamiento doble
+    return;
   }
   if (msgId) markIdProcessed(msgId);
 
@@ -222,7 +249,6 @@ async function handleIncomingMessage(message) {
   const fromMe = message.key.fromMe || false;
   const pushName = message.pushName || (fromMe ? 'Yo (Mi Dispositivo)' : 'Contacto');
 
-  const rawMessage = message.message || {};
   const unwrapped = unwrapMessage(rawMessage);
   const snippet = extractTextSnippet(unwrapped);
 
@@ -230,11 +256,11 @@ async function handleIncomingMessage(message) {
   const isTarget = ALLOW_ALL_GROUPS || (remoteJid && TARGET_GROUPS.includes(remoteJid));
 
   if (!isTarget) {
-    logEvent(`🛑 [FILTRADO] De: "${pushName}" | Chat: ${remoteJid || 'Privado'} | No en TARGET_GROUPS | "${snippet.substring(0, 45)}"`);
+    logEvent(`🛑 [FILTRADO] De: "${pushName}" | Chat: ${remoteJid || 'Privado'} | Motivo: No coincide con lista blanca | Contenido: "${snippet.substring(0, 45)}"`);
     return;
   }
 
-  logEvent(`🎯 [ACEPTADO] De: "${pushName}" | Chat: ${remoteJid} | "${snippet.substring(0, 45)}"`);
+  logEvent(`🎯 [ACEPTADO] De: "${pushName}" | Chat: ${remoteJid} | Contenido: "${snippet.substring(0, 45)}"`);
 
   // Construir payload estándar compatible con n8n / Evolution API
   const formattedPayload = {
@@ -305,7 +331,11 @@ async function connectToWhatsApp() {
     connectTimeoutMs: 60000,
     keepAliveIntervalMs: 25000,
     generateHighQualityLinkPreview: false,
-    getMessage: async () => ({ conversation: '' })
+    getMessage: async (key) => {
+      const stored = msgStore.get(key.id);
+      if (stored) return stored;
+      return { conversation: '' };
+    }
   });
 
   currentSock = sock;
@@ -345,6 +375,15 @@ async function connectToWhatsApp() {
       } else if (connection === 'open') {
         logEvent('✅ [OK] ¡WHATSAPP VINCULADO Y EN LÍNEA EXITOSAMENTE!');
         logEvent('🚀 Conector activo: Despachando eventos directamente a tus Webhooks.');
+
+        // Suscripción forzada de presencia a los grupos configurados para asegurar entrega inmediata de eventos
+        if (!ALLOW_ALL_GROUPS && TARGET_GROUPS.length > 0) {
+          for (const grp of TARGET_GROUPS) {
+            try {
+              await sock.presenceSubscribe(grp);
+            } catch (e) {}
+          }
+        }
       }
     }
 
@@ -360,8 +399,8 @@ async function connectToWhatsApp() {
     if (events['messages.upsert']) {
       const upsert = events['messages.upsert'];
       if (Array.isArray(upsert.messages)) {
-        for (const msg of upsert.messages) {
-          await handleIncomingMessage(msg);
+        for (const message of upsert.messages) {
+          await handleIncomingMessage(message);
         }
       }
     }
